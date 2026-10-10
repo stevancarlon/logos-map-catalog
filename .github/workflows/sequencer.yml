@@ -1,0 +1,82 @@
+name: Real map registry integration
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - submodules/maps
+      - .github/workflows/sequencer.yml
+permissions:
+  contents: read
+jobs:
+  registry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          submodules: true
+      - name: Install build dependencies and pinned host Rust
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang libclang-dev libssl-dev pkg-config cmake ninja-build libpcsclite-dev
+          rustup toolchain install 1.98.1 --profile minimal
+          echo 'RUSTUP_TOOLCHAIN=1.98.1' >> "$GITHUB_ENV"
+      - name: Install verified guest compiler and executor
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/map-tools/compiler" "$RUNNER_TEMP/map-tools/executor"
+          cd "$RUNNER_TEMP/map-tools"
+          curl --fail --location --retry 3 -o rust.tar.gz https://github.com/risc0/rust/releases/download/r0.1.97.0/rust-toolchain-x86_64-unknown-linux-gnu.tar.gz
+          curl --fail --location --retry 3 -o executor.tgz https://github.com/risc0/risc0/releases/download/v3.0.5/cargo-risczero-x86_64-unknown-linux-gnu.tgz
+          python3 - <<'PY'
+          import hashlib,pathlib,tarfile,os
+          for name,digest,dest in [('rust.tar.gz','100b597d605b706bec94e1d32bfaaf5851df8d75173f986d4b56a3e90916be53','compiler'),('executor.tgz','936ef988b78f20e3bd9f80e375f3adc934b13addc6ae2680f2e5fc0bcc966158','executor')]:
+              with open(name,'rb') as stream: assert hashlib.file_digest(stream,'sha256').hexdigest()==digest
+              with tarfile.open(name) as archive: archive.extractall(dest,filter='data')
+          compilers=list(pathlib.Path('compiler').rglob('bin/rustc')); assert len(compilers)==1,compilers
+          executor=pathlib.Path('executor/r0vm'); assert executor.is_file()
+          with open(os.environ['GITHUB_ENV'],'a') as env:
+              env.write('RISC0_RUSTC='+str(compilers[0].resolve())+'\n')
+              env.write('RISC0_SERVER_PATH='+str(executor.resolve())+'\n')
+          PY
+      - name: Prepare published integration sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="$GITHUB_WORKSPACE/submodules/maps/sdk/source"
+          mkdir -p "$source/scripts" "$source/artifacts" "$source/evidence" "$source/.tmp"
+          cp submodules/maps/integration/scripts/{build-maps-v03-guest.sh,build-v03-sequencer.py,test-v03-sequencer.py,test-maps-publish-cli.py,fixture_process.py} "$source/scripts/"
+          git clone --filter=blob:none https://github.com/logos-blockchain/logos-execution-zone.git "$RUNNER_TEMP/sequencer-source"
+          git -C "$RUNNER_TEMP/sequencer-source" checkout --detach db66590ab821a4e142c211017a3866d007f6fa77
+      - name: Build guest and SDK chain client
+        working-directory: submodules/maps/sdk/source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build-maps-v03-guest.sh
+          CARGO_TARGET_DIR="$PWD/target" cargo build --manifest-path lez-v03/Cargo.toml --locked -p logos-maps-v03-sdk --example maps-chain
+      - name: Build unmodified pinned standalone sequencer
+        working-directory: submodules/maps/sdk/source
+        run: python3 scripts/build-v03-sequencer.py --source "$RUNNER_TEMP/sequencer-source" --target-dir "$RUNNER_TEMP/sequencer-build"
+      - name: Exercise signed deployment registration and SDK queries
+        working-directory: submodules/maps/sdk/source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/test-v03-sequencer.py --sequencer artifacts/lez-v03-runtime/sequencer_service --suite maps > artifacts/hosted-registry-result.log 2>&1
+      - name: Preserve integration evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: real-map-registry-linux
+          path: |
+            submodules/maps/sdk/source/evidence/
+            submodules/maps/sdk/source/artifacts/*.log
+            submodules/maps/sdk/source/artifacts/lez-v03-runtime/build.json
+          if-no-files-found: warn
