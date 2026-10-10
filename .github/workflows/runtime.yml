@@ -94,6 +94,12 @@ jobs:
           set -euo pipefail
           cd submodules/maps/integration
           python3 scripts/test-maps-result-state.py --basecamp "$BASECAMP" --output evidence/rejected-input-result.json > artifacts/rejected-input-result.log 2>&1
+      - name: Verify library availability and version labels
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd submodules/maps/integration
+          python3 scripts/test-maps-library-states.py --basecamp "$BASECAMP" --output evidence/library-states.json > artifacts/library-states.log 2>&1
       - name: Preserve runtime evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
