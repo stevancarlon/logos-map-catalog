@@ -29,7 +29,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/map-packages"
-          for item in logos_maps:0.2.0 maps_publisher:0.1.0 maps_distribution:0.2.0; do
+          for item in logos_maps:0.2.1 maps_publisher:0.1.1 maps_distribution:0.2.1; do
             name="${item%:*}"; version="${item#*:}"
             mkdir -p "$RUNNER_TEMP/map-packages/$name"
             gh release download "$name-v$version" --repo "$GITHUB_REPOSITORY" --pattern '*.lgx' --dir "$RUNNER_TEMP/map-packages/$name"
@@ -88,6 +88,12 @@ jobs:
           cd submodules/maps/integration
           mkdir -p artifacts evidence
           python3 scripts/test-basecamp-maps.py --basecamp "$BASECAMP" > artifacts/runtime-result.log 2>&1
+      - name: Verify rejected input hides previous success
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd submodules/maps/integration
+          python3 scripts/test-maps-result-state.py --basecamp "$BASECAMP" --output evidence/rejected-input-result.json > artifacts/rejected-input-result.log 2>&1
       - name: Preserve runtime evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
