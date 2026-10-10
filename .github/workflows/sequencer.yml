@@ -51,7 +51,7 @@ jobs:
           set -euo pipefail
           source="$GITHUB_WORKSPACE/submodules/maps/sdk/source"
           mkdir -p "$source/scripts" "$source/artifacts" "$source/evidence" "$source/.tmp"
-          cp submodules/maps/integration/scripts/{build-maps-v03-guest.sh,build-v03-sequencer.py,test-v03-sequencer.py,test-maps-publish-cli.py,fixture_process.py} "$source/scripts/"
+          cp submodules/maps/integration/scripts/{build-maps-v03-guest.sh,build-v03-sequencer.py,test-v03-sequencer.py,test-maps-publish-cli.py,test-maps-v03-host.py,fixture_process.py} "$source/scripts/"
           git clone --filter=blob:none https://github.com/logos-blockchain/logos-execution-zone.git "$RUNNER_TEMP/sequencer-source"
           git -C "$RUNNER_TEMP/sequencer-source" checkout --detach db66590ab821a4e142c211017a3866d007f6fa77
       - name: Build guest and SDK chain client
@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/build-maps-v03-guest.sh
-          CARGO_TARGET_DIR="$PWD/target" cargo build --manifest-path lez-v03/Cargo.toml --locked -p logos-maps-v03-sdk --example maps-chain
+          CARGO_TARGET_DIR="$PWD/target" cargo build --manifest-path lez-v03/Cargo.toml --locked -p logos-maps-v03-sdk --example maps-chain --example maps-discovery
       - name: Build unmodified pinned standalone sequencer
         working-directory: submodules/maps/sdk/source
         run: python3 scripts/build-v03-sequencer.py --source "$RUNNER_TEMP/sequencer-source" --target-dir "$RUNNER_TEMP/sequencer-build"
@@ -70,6 +70,26 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/test-v03-sequencer.py --sequencer artifacts/lez-v03-runtime/sequencer_service --suite maps > artifacts/hosted-registry-result.log 2>&1
+      - name: Verify authentic extract through real Storage and sequencer
+        working-directory: submodules/maps/sdk/source
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/storage.zip" https://github.com/logos-storage/logos-storage-nim/releases/download/v0.5.3/logos-storage-linux-amd64-v0.5.3.zip
+          python3 - <<'PYCODE'
+          import hashlib,os,pathlib,zipfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          with (root/'storage.zip').open('rb') as stream:
+              assert hashlib.file_digest(stream,'sha256').hexdigest()=='1086fae4f283cab882f133abe4d5a88cfae8d61edba9f0094c7f75b368ec9d56'
+          with zipfile.ZipFile(root/'storage.zip') as archive:
+              names=archive.namelist()
+              assert names==['logos-storage-linux-amd64-v0.5.3'],names
+              archive.extractall(root/'storage')
+          (root/'storage/logos-storage-linux-amd64-v0.5.3').chmod(0o755)
+          PYCODE
+          target/debug/examples/maps-discovery > artifacts/hosted-source-discovery.json
+          version="$(python3 -c 'import json; print(json.load(open("artifacts/hosted-source-discovery.json"))["source_version"]["version"])')"
+          python3 scripts/test-maps-v03-host.py --storage "$RUNNER_TEMP/storage/logos-storage-linux-amd64-v0.5.3" --sequencer artifacts/lez-v03-runtime/sequencer_service --version "$version" --mode fetch > artifacts/hosted-storage-result.log 2>&1
       - name: Preserve integration evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -78,5 +98,6 @@ jobs:
           path: |
             submodules/maps/sdk/source/evidence/
             submodules/maps/sdk/source/artifacts/*.log
+            submodules/maps/sdk/source/artifacts/hosted-source-discovery.json
             submodules/maps/sdk/source/artifacts/lez-v03-runtime/build.json
           if-no-files-found: warn
