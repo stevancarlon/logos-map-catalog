@@ -16,3 +16,6 @@
 ; After cloning a fork, materialise the submodule working trees with:
 ;
 ;   git submodule update --init --recursive
+[submodule "submodules/maps"]
+	path = submodules/maps
+	url = https://github.com/stevancarlon/logos-map-library.git
