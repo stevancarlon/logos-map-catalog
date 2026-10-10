@@ -19,9 +19,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           submodules: true
-      - uses: cachix/install-nix-action@v27
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: logos-co/setup-nix-cache-action@781f072122f4df6af0e33a7d355ebd20283e019e
       - name: Build pinned package verifier
         run: nix build github:logos-co/logos-package/c25a1167578aef5cbd9a9b6f822ffe2ae4fd6a89#lgx --out-link "$RUNNER_TEMP/lgx-tool"
       - name: Fetch released modules and pinned Basecamp
@@ -59,6 +57,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y libopengl0 libegl1
           cd "$RUNNER_TEMP"
           chmod +x LogosBasecamp-Desktop-v0.3.2-f2fae6-x86_64.AppImage
           ./LogosBasecamp-Desktop-v0.3.2-f2fae6-x86_64.AppImage --appimage-extract > /dev/null
